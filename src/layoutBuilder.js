@@ -1,5 +1,9 @@
 'use strict';
 
+// BEGIN PATCH FOR RTL SUPPORT 1/3
+var { default: bidiJs } = require('bidi-js');
+// END PATCH FOR RTL SUPPORT 1/3
+
 var TraversalTracker = require('./traversalTracker');
 var DocPreprocessor = require('./docPreprocessor');
 var DocMeasure = require('./docMeasure');
@@ -27,12 +31,75 @@ function addAll(target, otherArray) {
 	});
 }
 
+// BEGIN PATCH FOR RTL SUPPORT 2/3
+function reorderText(text) {
+	const bidi = bidiJs();
+	const embeddingLevels = bidi.getEmbeddingLevels(text);
+
+	// Get the character ranges associated to each embedding level, we'll need to flip the words within any range of EVEN numbered level, including nested ODD numbered levels (but for those the words within the ODD numbered range will be kept in the same order)
+	const levelRanges = embeddingLevels.levels.reduce((acc, level, index) => {
+		let hasOpenRange = acc.length && acc[acc.length - 1].length < 3;
+		if (hasOpenRange && acc[acc.length - 1][0] !== level) {
+			acc[acc.length - 1][2] = index;
+			hasOpenRange = false;
+		} else if (hasOpenRange && index === embeddingLevels.levels.length - 1) {
+			acc[acc.length - 1][2] = index + 1;
+		}
+
+		if (!hasOpenRange) {
+			acc.push([level, index]);
+		}
+
+		return acc;
+	}, []);
+
+	const chars = text.split('');
+
+	// Flip (eastern) arabic numerals (because pdfmake will flip them back) NOTE: AN = Arabic Numeral
+	// and replace mirrored characters (e.g. brackets) NOTE: This likely has a lot of unsupported edge cases
+	const { easternArabicNumeralFlips, mirroredCharacterReplacements } = chars
+		.reduce((acc, char, index) => {
+			// Numeral flips
+			const charType = bidi.getBidiCharTypeName(char);
+			const hasOpenRange =
+				acc.easternArabicNumeralFlips.length && acc.easternArabicNumeralFlips[acc.easternArabicNumeralFlips.length - 1].length === 1;
+			if (charType === 'AN' && !hasOpenRange) {
+				acc.easternArabicNumeralFlips.push([index]);
+			} else if (charType !== 'AN' && hasOpenRange) {
+				acc[acc.easternArabicNumeralFlips.length - 1].push(index);
+			} else if (index === text.length - 1 && hasOpenRange) {
+				acc[acc.easternArabicNumeralFlips.length - 1].push(index + 1);
+			}
+
+			// Mirrored characters
+			const mirroredChar =
+				embeddingLevels.levels[index] % 2
+					? bidi.getMirroredCharacter(char)
+					: null;
+			if (mirroredChar) {
+				acc.mirroredCharacterReplacements.push([index, mirroredChar]);
+			}
+
+			return acc;
+		}, {
+			easternArabicNumeralFlips: [],
+			mirroredCharacterReplacements: []
+		});
+
+	return {
+		easternArabicNumeralFlips,
+		levelRanges,
+		mirroredCharacterReplacements
+	};
+}
+// END PATCH FOR RTL SUPPORT 2/3
+
 /**
  * Creates an instance of LayoutBuilder - layout engine which turns document-definition-object
  * into a set of pages, lines, inlines and vectors ready to be rendered into a PDF
  *
- * @param {Object} pageSize - an object defining page width and height
- * @param {Object} pageMargins - an object defining top, left, right and bottom margins
+ * @param {object} pageSize - an object defining page width and height
+ * @param {object} pageMargins - an object defining top, left, right and bottom margins
  */
 function LayoutBuilder(pageSize, pageMargins, imageMeasure, svgMeasure) {
 	this.pageSize = pageSize;
@@ -51,11 +118,11 @@ LayoutBuilder.prototype.registerTableLayouts = function (tableLayouts) {
  * Executes layout engine on document-definition-object and creates an array of pages
  * containing positioned Blocks, Lines and inlines
  *
- * @param {Object} docStructure document-definition-object
- * @param {Object} fontProvider font provider
- * @param {Object} styleDictionary dictionary with style definitions
- * @param {Object} defaultStyle default style definition
- * @return {Array} an array of pages
+ * @param {object} docStructure document-definition-object
+ * @param {object} fontProvider font provider
+ * @param {object} styleDictionary dictionary with style definitions
+ * @param {object} defaultStyle default style definition
+ * @returns {Array} an array of pages
  */
 LayoutBuilder.prototype.layoutDocument = function (docStructure, fontProvider, styleDictionary, defaultStyle, background, header, footer, images, watermark, pageBreakBeforeFct) {
 
@@ -764,6 +831,115 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 	}
 
 	line.lastLineInParagraph = textNode._inlines.length === 0;
+
+	// BEGIN PATCH FOR RTL SUPPORT 3/3
+	const lineText = line.inlines.reduce((acc, inline) => acc + inline.text, '');
+
+	let {
+		easternArabicNumeralFlips,
+		levelRanges,
+		mirroredCharacterReplacements
+	} = reorderText(lineText);
+
+	const inlineLengths = line.inlines.reduce((acc, inline) => {
+		acc.push((acc[acc.length - 1] || 0) + inline.text.length);
+		return acc;
+	}, []);
+
+	mirroredCharacterReplacements.forEach((mirroredCharacterReplacement) => {
+		const [index, replacement] = mirroredCharacterReplacement;
+
+		const inlineIndex = inlineLengths.findIndex(length => length > index);
+
+		const position = index - (inlineLengths[inlineIndex - 1] || 0);
+
+		const { text } = line.inlines[inlineIndex];
+
+		const textStart = text.slice(0, position);
+		const textEnd = text.slice(position + replacement.length);
+
+		line.inlines[inlineIndex].text = `${textStart}${replacement}${textEnd}`;
+	});
+
+	easternArabicNumeralFlips.forEach((easternArabicNumeralFlip) => {
+		const [start, end] = easternArabicNumeralFlip;
+		const rangeLength = end - start;
+
+		const inlineIndex = inlineLengths.findIndex(length => length > start);
+
+		const position = start - (inlineLengths[inlineIndex - 1] || 0);
+
+		const { text } = line.inlines[inlineIndex];
+
+		const textStart = text.slice(0, position);
+		const textToFlip = text.slice(position, position + rangeLength);
+		const textEnd = text.slice(position + rangeLength);
+
+		const flippedText = textToFlip.split('').reverse().join('');
+
+		line.inlines[inlineIndex].text = `${textStart}${flippedText}${textEnd}`;
+	});
+
+	let pending = [];
+
+	line.inlines = levelRanges.reduce((acc, levelRange, index) => {
+		const [level, start, end] = levelRange;
+
+		const isOdd = !!(level % 2);
+
+		const inlineStartIndex = inlineLengths.findIndex(length => length > start);
+		const inlineEndIndex = inlineLengths.findIndex(length => length >= end);
+
+		const currentSlice = line.inlines.slice(inlineStartIndex, inlineEndIndex + 1);
+
+		if (index === 0 && !isOdd) {
+			return acc.concat(currentSlice);
+		}
+
+		if (index < levelRanges.length - 1 || (index === levelRanges.length - 1 && isOdd)) {
+			if (isOdd) {
+				pending = pending.concat(currentSlice);
+			} else {
+				pending.push(currentSlice);
+			}
+		}
+
+		if (index === levelRanges.length - 1) {
+			pending.reverse();
+
+			const pendingFlat = pending.map((item) => {
+				// Fix alignment of RTL text
+				if (!Array.isArray(item)) {
+					item.text = item.text.trim();
+				}
+				return item;
+			}).flat();
+
+			let x = pendingFlat.reduce((acc, item) => {
+				if (acc === null) {
+					return item.x;
+				}
+
+				return item.x < acc ? item.x : acc;
+			}, null);
+
+			const pendingFlatWithCorrectedPositions = pendingFlat.map((item) => {
+				item.x = x;
+				x += item.width;
+
+				return item;
+			});
+
+			acc = acc.concat(pendingFlatWithCorrectedPositions);
+
+			if (!isOdd) {
+				return acc.concat(currentSlice);
+			}
+		}
+
+		return acc;
+	}, []);
+	// END PATCH FOR RTL SUPPORT 3/3
 
 	return line;
 };
