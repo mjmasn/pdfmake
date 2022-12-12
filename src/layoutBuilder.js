@@ -914,13 +914,20 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 		if (index === lastIndex) {
 			pending.reverse();
 
-			const pendingFlat = pending.map((item) => {
+			const isEndLine = line.inlines.some((inline) => inline.leadingCut + inline.trailingCut === 0);
+
+			pending.forEach((item) => {
 				// Fix alignment of RTL text
-				if (!Array.isArray(item)) {
+				if (!Array.isArray(item) && !isEndLine) {
 					item.text = item.text.trim();
+				} else if (Array.isArray(item) && isEndLine) {
+					item.forEach((item) => {
+						item.text = ` ${item.text.trim()}`;
+					});
 				}
-				return item;
-			}).flat();
+			});
+
+			const pendingFlat = pending.flat();
 
 			let x = pendingFlat.reduce((acc, item) => {
 				if (acc === null) {
