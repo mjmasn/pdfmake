@@ -39,15 +39,20 @@ function reorderText(text) {
 	// Get the character ranges associated to each embedding level, we'll need to flip the words within any range of EVEN numbered level, including nested ODD numbered levels (but for those the words within the ODD numbered range will be kept in the same order)
 	const levelRanges = embeddingLevels.levels.reduce((acc, level, index) => {
 		let hasOpenRange = acc.length && acc[acc.length - 1].length < 3;
+
 		if (hasOpenRange && acc[acc.length - 1][0] !== level) {
-			acc[acc.length - 1][2] = index;
+			acc[acc.length - 1][2] = index - 1;
 			hasOpenRange = false;
-		} else if (hasOpenRange && index === embeddingLevels.levels.length - 1) {
-			acc[acc.length - 1][2] = index + 1;
 		}
 
 		if (!hasOpenRange) {
 			acc.push([level, index]);
+		}
+
+		const isLast = index === embeddingLevels.levels.length - 1;
+
+		if (isLast) {
+			acc[acc.length - 1][2] = index;
 		}
 
 		return acc;
@@ -66,9 +71,9 @@ function reorderText(text) {
 			if (charType === 'AN' && !hasOpenRange) {
 				acc.easternArabicNumeralFlips.push([index]);
 			} else if (charType !== 'AN' && hasOpenRange) {
-				acc[acc.easternArabicNumeralFlips.length - 1].push(index);
+				acc[acc.easternArabicNumeralFlips.length - 1].push(index - 1);
 			} else if (index === text.length - 1 && hasOpenRange) {
-				acc[acc.easternArabicNumeralFlips.length - 1].push(index + 1);
+				acc[acc.easternArabicNumeralFlips.length - 1].push(index);
 			}
 
 			// Mirrored characters
@@ -841,17 +846,17 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 		mirroredCharacterReplacements
 	} = reorderText(lineText);
 
-	const inlineLengths = line.inlines.reduce((acc, inline) => {
-		acc.push((acc[acc.length - 1] || 0) + inline.text.length);
-		return acc;
-	}, []);
+	const inlineIndexes = line.inlines.reduce((acc, inline) => {
+		acc.push((acc[acc.length - 1]) + inline.text.length);
+		return acc
+	}, [0]);
 
 	mirroredCharacterReplacements.forEach((mirroredCharacterReplacement) => {
 		const [index, replacement] = mirroredCharacterReplacement;
 
-		const inlineIndex = inlineLengths.findIndex(length => length > index);
+		const inlineIndex = inlineIndexes.findLastIndex((inlineIndex) => inlineIndex <= index);
 
-		const position = index - (inlineLengths[inlineIndex - 1] || 0);
+		const position = index - inlineIndexes[inlineIndex];
 
 		const { text } = line.inlines[inlineIndex];
 
@@ -863,11 +868,11 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 
 	easternArabicNumeralFlips.forEach((easternArabicNumeralFlip) => {
 		const [start, end] = easternArabicNumeralFlip;
-		const rangeLength = end - start;
+		const rangeLength = 1 + (end - start);
 
-		const inlineIndex = inlineLengths.findIndex(length => length > start);
+		const inlineIndex = inlineIndexes.findLastIndex((inlineIndex) => inlineIndex <= index);
 
-		const position = start - (inlineLengths[inlineIndex - 1] || 0);
+		const position = start - inlineIndexes[inlineIndex];
 
 		const { text } = line.inlines[inlineIndex];
 
@@ -887,8 +892,8 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 
 		const isOdd = !!(level % 2);
 
-		const inlineStartIndex = inlineLengths.findIndex(length => length > start);
-		const inlineEndIndex = inlineLengths.findIndex(length => length >= end);
+		const inlineStartIndex = inlineIndexes.findIndex((inlineIndex) => inlineIndex >= start);
+		const inlineEndIndex = inlineIndexes.findLastIndex((inlineIndex) => inlineIndex <= end);
 
 		const currentSlice = line.inlines.slice(inlineStartIndex, inlineEndIndex + 1);
 
@@ -896,7 +901,9 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 			return acc.concat(currentSlice);
 		}
 
-		if (index < levelRanges.length - 1 || (index === levelRanges.length - 1 && isOdd)) {
+		const lastIndex = levelRanges.length - 1;
+
+		if (index < lastIndex || (index === lastIndex && isOdd)) {
 			if (isOdd) {
 				pending = pending.concat(currentSlice);
 			} else {
@@ -904,7 +911,7 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 			}
 		}
 
-		if (index === levelRanges.length - 1) {
+		if (index === lastIndex) {
 			pending.reverse();
 
 			const pendingFlat = pending.map((item) => {
@@ -931,7 +938,6 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 			});
 
 			acc = acc.concat(pendingFlatWithCorrectedPositions);
-
 			if (!isOdd) {
 				return acc.concat(currentSlice);
 			}
