@@ -13029,7 +13029,7 @@ function () {
 
 /***/ }),
 
-/***/ 89528:
+/***/ 78760:
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -51694,7 +51694,7 @@ module.exports = __webpack_require__(17187).EventEmitter;
 
 /***/ }),
 
-/***/ 45665:
+/***/ 37193:
 /***/ (function(module, exports, __webpack_require__) {
 
 var __WEBPACK_AMD_DEFINE_FACTORY__, __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;(function(a,b){if(true)!(__WEBPACK_AMD_DEFINE_ARRAY__ = [], __WEBPACK_AMD_DEFINE_FACTORY__ = (b),
@@ -66840,7 +66840,7 @@ module.exports = URLBrowserResolver;
 var isFunction = (__webpack_require__(6225).isFunction);
 var isUndefined = (__webpack_require__(6225).isUndefined);
 var isNull = (__webpack_require__(6225).isNull);
-var FileSaver = __webpack_require__(45665);
+var FileSaver = __webpack_require__(37193);
 var saveAs = FileSaver.saveAs;
 
 var defaultClientFonts = {
@@ -70298,13 +70298,20 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 		if (index === lastIndex) {
 			pending.reverse();
 
-			const pendingFlat = pending.map((item) => {
+			const isEndLine = line.inlines.some((inline) => inline.leadingCut + inline.trailingCut === 0);
+
+			pending.forEach((item) => {
 				// Fix alignment of RTL text
-				if (!Array.isArray(item)) {
+				if (!Array.isArray(item) && !isEndLine) {
 					item.text = item.text.trim();
+				} else if (Array.isArray(item) && isEndLine) {
+					item.forEach((item) => {
+						item.text = ` ${item.text.trim()}`;
+					});
 				}
-				return item;
-			}).flat();
+			});
+
+			const pendingFlat = pending.flat();
 
 			let x = pendingFlat.reduce((acc, item) => {
 				if (acc === null) {
@@ -70666,7 +70673,7 @@ function _interopDefault(ex) {
 	return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex;
 }
 
-var PdfKit = _interopDefault(__webpack_require__(89528));
+var PdfKit = _interopDefault(__webpack_require__(78760));
 
 function getEngineInstance() {
 	return PdfKit;
