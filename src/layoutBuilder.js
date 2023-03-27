@@ -24,6 +24,9 @@ var isFunction = require('./helpers').isFunction;
 var TextTools = require('./textTools');
 var StyleContextStack = require('./styleContextStack');
 var isNumber = require('./helpers').isNumber;
+var findLastIndex = require('array.prototype.findlastindex');
+
+findLastIndex.shim();
 
 function addAll(target, otherArray) {
 	otherArray.forEach(function (item) {
@@ -848,7 +851,7 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 
 	const inlineIndexes = line.inlines.reduce((acc, inline) => {
 		acc.push((acc[acc.length - 1]) + inline.text.length);
-		return acc
+		return acc;
 	}, [0]);
 
 	mirroredCharacterReplacements.forEach((mirroredCharacterReplacement) => {
